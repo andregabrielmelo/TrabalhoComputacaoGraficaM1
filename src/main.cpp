@@ -23,7 +23,7 @@ vector<Face> faces;
 // Transformações
 float rotX = 0, rotY = 0, rotZ = 0;
 float scale = 0.1f;
-float transX = 0, transY = 0, transZ = -50;
+float transX = 0, transY = 0, transZ = 0;
 
 // Luzes
 bool light0 = true;
@@ -65,137 +65,99 @@ void keyboard(unsigned char key, int, int) {
     glutPostRedisplay();
 }
 
-// Loader simples de BMP (24 bits)
-void loadTexture(const char* filename) {
-    FILE* file = fopen(filename, "rb");
-    if (!file) {
-        cout << "Erro ao carregar textura\n";
+void loadOBJ(const char* filename) {
+    ifstream file(filename);
+
+    if (!file.is_open()) {
+        cout << "Erro ao abrir arquivo OBJ: " << filename << endl;
         return;
     }
 
-    unsigned char header[54];
-    fread(header, sizeof(unsigned char), 54, file);
-
-    int width = *(int*)&header[18];
-    int height = *(int*)&header[22];
-
-    int size = 3 * width * height;
-    unsigned char* data = new unsigned char[size];
-
-    fread(data, sizeof(unsigned char), size, file);
-    fclose(file);
-
-    // BGR → RGB
-    for (int i = 0; i < size; i += 3) {
-        swap(data[i], data[i + 2]);
-    }
-
-    glGenTextures(1, &textureID);
-    glBindTexture(GL_TEXTURE_2D, textureID);
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
-
-    delete[] data;
-}
-
-void loadOBJ(const char* filename) {
-    ifstream file(filename);
     string line;
 
     while (getline(file, line)) {
+        if (line.empty() || line[0] == '#') continue;
+
         stringstream ss(line);
         string type;
         ss >> type;
 
         if (type == "v") {
-            Vec3 v; ss >> v.x >> v.y >> v.z;
+            Vec3 v;
+            ss >> v.x >> v.y >> v.z;
             vertices.push_back(v);
         }
         else if (type == "vn") {
-            Vec3 n; ss >> n.x >> n.y >> n.z;
+            Vec3 n;
+            ss >> n.x >> n.y >> n.z;
             normals.push_back(n);
         }
         else if (type == "vt") {
-            Vec2 t; ss >> t.u >> t.v;
+            Vec2 t;
+            ss >> t.u >> t.v;
             textures.push_back(t);
         }
         else if (type == "f") {
-            Face f;
+            vector<string> verts;
+            string vert;
 
-            for (int i = 0; i < 3; i++) {
-                string vert;
-                ss >> vert;
-
-                int v = 0, t = 0, n = 0;
-
-                sscanf(vert.c_str(), "%d/%d/%d", &v, &t, &n);
-
-                f.v[i] = v - 1;
-                f.t[i] = t - 1;
-                f.n[i] = n - 1;
+            // Read ALL vertices of the face (not just 3)
+            while (ss >> vert) {
+                verts.push_back(vert);
             }
 
-            faces.push_back(f);
+            // Triangulate (fan method)
+            for (size_t i = 1; i + 1 < verts.size(); i++) {
+                Face f;
+
+                string vStr[3] = { verts[0], verts[i], verts[i + 1] };
+
+                for (int k = 0; k < 3; k++) {
+                    int v = 0, t = 0, n = 0;
+
+                    // Try all formats
+                    if (sscanf(vStr[k].c_str(), "%d/%d/%d", &v, &t, &n) == 3) {
+                        // v/t/n
+                    }
+                    else if (sscanf(vStr[k].c_str(), "%d//%d", &v, &n) == 2) {
+                        t = 0;
+                    }
+                    else if (sscanf(vStr[k].c_str(), "%d/%d", &v, &t) == 2) {
+                        n = 0;
+                    }
+                    else if (sscanf(vStr[k].c_str(), "%d", &v) == 1) {
+                        t = n = 0;
+                    }
+                    else {
+                        v = t = n = 0;
+                    }
+
+                    f.v[k] = (v > 0) ? v - 1 : (v < 0 ? (int)vertices.size() + v : -1);
+                    f.t[k] = (t > 0) ? t - 1 : (t < 0 ? (int)textures.size() + t : -1);
+                    f.n[k] = (n > 0) ? n - 1 : (n < 0 ? (int)normals.size() + n : -1);
+                }
+
+                faces.push_back(f);
+            }
         }
     }
-}
 
-void setupLights() {
-    if (!useLighting) {
-        glDisable(GL_LIGHTING);
-        return;
-    }
-
-    glEnable(GL_LIGHTING);
-
-    GLfloat globalAmbient[] = { 0.2f, 0.2f, 0.2f, 1.0f };
-    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, globalAmbient);
-
-    GLfloat pos0[] = { 10, 10, 10, 1 };
-    GLfloat pos1[] = { -10, 10, 10, 1 };
-    GLfloat pos2[] = { 0, -10, 10, 1 };
-
-    // LIGHT 0
-    if (light0) glEnable(GL_LIGHT0); else glDisable(GL_LIGHT0);
-    glLightfv(GL_LIGHT0, GL_POSITION, pos0);
-
-    GLfloat diff0[] = { 1, 0, 0, 1 };
-    GLfloat amb0[] = { 0.2f, 0, 0, 1 };
-    glLightfv(GL_LIGHT0, GL_DIFFUSE, diff0);
-    glLightfv(GL_LIGHT0, GL_SPECULAR, diff0);
-    glLightfv(GL_LIGHT0, GL_AMBIENT, amb0);
-
-    // LIGHT 1
-    if (light1) glEnable(GL_LIGHT1); else glDisable(GL_LIGHT1);
-    glLightfv(GL_LIGHT1, GL_POSITION, pos1);
-
-    GLfloat diff1[] = { 0, 1, 0, 1 };
-    GLfloat amb1[] = { 0, 0.2f, 0, 1 };
-    glLightfv(GL_LIGHT1, GL_DIFFUSE, diff1);
-    glLightfv(GL_LIGHT1, GL_SPECULAR, diff1);
-    glLightfv(GL_LIGHT1, GL_AMBIENT, amb1);
-
-    // LIGHT 2
-    if (light2) glEnable(GL_LIGHT2); else glDisable(GL_LIGHT2);
-    glLightfv(GL_LIGHT2, GL_POSITION, pos2);
-
-    GLfloat diff2[] = { 0, 0, 1, 1 };
-    GLfloat amb2[] = { 0, 0, 0.2f, 1 };
-    glLightfv(GL_LIGHT2, GL_DIFFUSE, diff2);
-    glLightfv(GL_LIGHT2, GL_SPECULAR, diff2);
-    glLightfv(GL_LIGHT2, GL_AMBIENT, amb2);
+    cout << "OBJ carregado: "
+        << vertices.size() << " vertices, "
+        << normals.size() << " normals, "
+        << textures.size() << " texcoords, "
+        << faces.size() << " faces\n";
 }
 
 void drawModel() {
-    glBindTexture(GL_TEXTURE_2D, textureID);
-
     glBegin(GL_TRIANGLES);
 
     for (auto& f : faces) {
         for (int i = 0; i < 3; i++) {
+            if (f.v[i] < 0 || f.v[i] >= vertices.size()) {
+                cout << "Invalid vertex index: " << f.v[i] << endl;
+                continue;
+            }
 
             if (f.n[i] >= 0 && f.n[i] < normals.size()) {
                 Vec3 n = normals[f.n[i]];
@@ -261,11 +223,73 @@ void drawVariables() {
     drawText(10, 380, string("Lighting: ") + (useLighting ? "ON" : "OFF"));
 }
 
+
+void setupLights() {
+    if (!useLighting) {
+        glDisable(GL_LIGHTING);
+        return;
+    }
+
+    glEnable(GL_LIGHTING);
+    glEnable(GL_NORMALIZE);
+
+    // EXACT match to reference project behavior
+    glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_TRUE);
+
+    // Global ambient (same idea as reference)
+    GLfloat globalAmbient[] = { 0.2f, 0.2f, 0.2f, 1.0f };
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, globalAmbient);
+
+    // IMPORTANT: set lights in WORLD SPACE (identity matrix)
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    // ---------------- LIGHT 0 (RED) ----------------
+    if (light0) glEnable(GL_LIGHT0); else glDisable(GL_LIGHT0);
+
+    GLfloat pos0[] = { 0.5f, 0.5f, 0.5f, 1.0f };   // like reference (small scene coords)
+    GLfloat amb0[] = { 0.2f, 0.0f, 0.0f, 1.0f };
+    GLfloat diff0[] = { 0.8f, 0.0f, 0.0f, 1.0f };
+    GLfloat spec0[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+
+    glLightfv(GL_LIGHT0, GL_POSITION, pos0);
+    glLightfv(GL_LIGHT0, GL_AMBIENT, amb0);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, diff0);
+    glLightfv(GL_LIGHT0, GL_SPECULAR, spec0);
+
+    // ---------------- LIGHT 1 (GREEN) ----------------
+    if (light1) glEnable(GL_LIGHT1); else glDisable(GL_LIGHT1);
+
+    GLfloat pos1[] = { -0.5f, 0.5f, 0.5f, 1.0f };
+    GLfloat amb1[] = { 0.0f, 0.2f, 0.0f, 1.0f };
+    GLfloat diff1[] = { 0.0f, 0.8f, 0.0f, 1.0f };
+    GLfloat spec1[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+
+    glLightfv(GL_LIGHT1, GL_POSITION, pos1);
+    glLightfv(GL_LIGHT1, GL_AMBIENT, amb1);
+    glLightfv(GL_LIGHT1, GL_DIFFUSE, diff1);
+    glLightfv(GL_LIGHT1, GL_SPECULAR, spec1);
+
+    // ---------------- LIGHT 2 (BLUE) ----------------
+    if (light2) glEnable(GL_LIGHT2); else glDisable(GL_LIGHT2);
+
+    GLfloat pos2[] = { 0.0f, -0.5f, 0.5f, 1.0f };
+    GLfloat amb2[] = { 0.0f, 0.0f, 0.2f, 1.0f };
+    GLfloat diff2[] = { 0.0f, 0.0f, 0.8f, 1.0f };
+    GLfloat spec2[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+
+    glLightfv(GL_LIGHT2, GL_POSITION, pos2);
+    glLightfv(GL_LIGHT2, GL_AMBIENT, amb2);
+    glLightfv(GL_LIGHT2, GL_DIFFUSE, diff2);
+    glLightfv(GL_LIGHT2, GL_SPECULAR, spec2);
+
+    glPopMatrix();
+}
+
 void display() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glLoadIdentity();
-
-    glEnable(GL_TEXTURE_2D);
 
     glTranslatef(0, 0, -50);
 
@@ -290,22 +314,20 @@ void display() {
 
 void init() {
     glEnable(GL_DEPTH_TEST);
-    glEnable(GL_NORMALIZE);
-    glEnable(GL_COLOR_MATERIAL);
 
     glColorMaterial(GL_FRONT, GL_AMBIENT_AND_DIFFUSE);
 
     glColor3f(1.0f, 1.0f, 1.0f);
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 
-    GLfloat matAmbient[] = { 0.3f, 0.3f, 0.3f, 1 };
-    GLfloat matDiffuse[] = { 0.8f, 0.8f, 0.8f, 1 };
-    GLfloat matSpecular[] = { 1, 1, 1, 1 };
+    GLfloat matDiffuse[] = { 0.8f, 0.8f, 0.8f, 1.0f };
+    GLfloat matSpecular[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    GLfloat matAmbient[] = { 0.2f, 0.2f, 0.2f, 1.0f };
 
-    glMaterialfv(GL_FRONT, GL_AMBIENT, matAmbient);
-    glMaterialfv(GL_FRONT, GL_DIFFUSE, matDiffuse);
-    glMaterialfv(GL_FRONT, GL_SPECULAR, matSpecular);
-    glMaterialf(GL_FRONT, GL_SHININESS, 50);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, matDiffuse);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, matSpecular);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, matAmbient);
+    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 32.0f);
 
     glClearColor(0.02f, 0.02f, 0.02f, 1);
 
@@ -314,8 +336,6 @@ void init() {
     gluPerspective(60.0, 800.0 / 600.0, 0.1, 1000.0);
 
     glMatrixMode(GL_MODELVIEW);
-
-    loadTexture("../textures/grass.bmp");
 }
 
 int main(int argc, char** argv) {
@@ -324,7 +344,7 @@ int main(int argc, char** argv) {
     glutInitWindowSize(800, 600);
     glutCreateWindow("3D Viewer");
 
-    init();
+    init();     
     loadOBJ("../objects/porsche.obj");
 
     glutDisplayFunc(display);
